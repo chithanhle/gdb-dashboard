@@ -453,6 +453,11 @@ class Dashboard(gdb.Command):
             except:
                 # skip cleanup for invalid outputs
                 pass
+    
+    def on_before_prompt(self):
+        Dashboard.set_render_intention("before_prompt")
+        if self.is_running():
+            self.render(clear_screen=True)
 
     def enable(self):
         if self.enabled:
@@ -462,6 +467,7 @@ class Dashboard(gdb.Command):
         gdb.events.cont.connect(self.on_continue)
         gdb.events.stop.connect(self.on_stop)
         gdb.events.exited.connect(self.on_exit)
+        gdb.events.before_prompt.connect(self.on_before_prompt)
 
     def disable(self):
         if not self.enabled:
@@ -578,6 +584,16 @@ class Dashboard(gdb.Command):
                     fs.close()
 
 # Utility methods --------------------------------------------------------------
+
+    __render_intention = "normal_update"
+
+    @classmethod
+    def render_intention(self):
+        return self.__render_intention
+
+    @classmethod
+    def set_render_intention(self, intention: str):
+        self.__render_intention = intention
 
     @staticmethod
     def start():
@@ -1956,6 +1972,7 @@ class Registers(Dashboard.Module):
 
     def __init__(self):
         self.table = {}
+        self.old_registers = []
 
     def label(self):
         return 'Registers'
@@ -1973,6 +1990,7 @@ class Registers(Dashboard.Module):
             register_list = Registers.fetch_register_list()
         # fetch registers status
         registers = []
+        any_register_changed = False
         for name in register_list:
             # exclude registers with a dot '.' or parse_and_eval() will fail
             if '.' in name:
@@ -1983,8 +2001,15 @@ class Registers(Dashboard.Module):
             if string_value == '<unavailable>':
                 continue
             changed = self.table and (self.table.get(name, '') != string_value)
+            any_register_changed = any_register_changed or changed
             self.table[name] = string_value
             registers.append((name, string_value, changed))
+        if not any_register_changed and Dashboard.render_intention() == "before_prompt":
+            registers = self.old_registers
+        else:
+            self.old_registers = registers
+        Dashboard.set_render_intention("normal_update")
+            
         # handle the empty register list
         if not registers:
             msg = 'No registers to show (check the "dashboard registers -style list" attribute)'
